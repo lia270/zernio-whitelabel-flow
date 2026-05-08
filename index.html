@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Zernio 去白牌实施流程 · Headless OAuth</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "PingFang SC",
+          "Microsoft YaHei", sans-serif;
+      }
+      .card {
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+      }
+      pre.code {
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 14px 16px;
+        border-radius: 8px;
+        font-size: 12px;
+        overflow-x: auto;
+        line-height: 1.6;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .step-num {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        background: #ea580c;
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        flex-shrink: 0;
+      }
+      .step-line {
+        position: absolute;
+        left: 17px;
+        top: 36px;
+        bottom: -28px;
+        width: 2px;
+        background: linear-gradient(180deg, #ea580c, #fed7aa);
+      }
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 500;
+      }
+      .badge-high { background: #fee2e2; color: #991b1b; }
+      .badge-medium { background: #fef3c7; color: #92400e; }
+      .kv {
+        display: grid;
+        grid-template-columns: 140px 1fr;
+        gap: 8px 12px;
+        font-size: 12px;
+      }
+      .kv dt {
+        color: #6b7280;
+        font-family: ui-monospace, monospace;
+      }
+      .kv dd {
+        color: #111827;
+      }
+      details summary {
+        cursor: pointer;
+        list-style: none;
+      }
+      details summary::-webkit-details-marker {
+        display: none;
+      }
+      details[open] summary .chev {
+        transform: rotate(90deg);
+      }
+      .chev {
+        display: inline-block;
+        transition: transform 0.15s;
+      }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-stone-900 min-h-screen">
+    <div class="max-w-5xl mx-auto px-6 py-10">
+      <!-- Header -->
+      <header class="mb-8">
+        <a href="../zernio-tracker/" class="text-xs text-stone-500 hover:text-orange-600">← 返回 Zernio 调研看板</a>
+        <h1 class="text-3xl font-bold mt-3 mb-2" id="title"></h1>
+        <p class="text-sm text-stone-500" id="subtitle"></p>
+        <div class="flex flex-wrap gap-3 text-xs text-stone-500 mt-2">
+          <span>验证日期：<span id="lastUpdated"></span></span>
+          <span>·</span>
+          <a id="docLink" href="#" target="_blank" class="text-orange-600 hover:underline">Zernio 官方文档 ↗</a>
+        </div>
+      </header>
+
+      <!-- TL;DR -->
+      <section class="card border-orange-200 bg-orange-50 p-5 mb-8">
+        <h2 class="font-semibold text-orange-900 mb-3 flex items-center gap-2">
+          <span class="text-xl">⚡</span>
+          TL;DR
+        </h2>
+        <ul class="space-y-1.5 text-sm text-orange-900" id="tldr-list"></ul>
+      </section>
+
+      <!-- Before / After -->
+      <section class="grid md:grid-cols-2 gap-4 mb-10">
+        <div class="card p-5">
+          <div class="text-xs uppercase tracking-wide text-stone-500 mb-2">❌ Before</div>
+          <h3 class="font-semibold mb-3" id="before-title"></h3>
+          <ol class="text-sm text-stone-700 space-y-1.5 mb-4" id="before-flow"></ol>
+          <div class="pt-3 border-t border-stone-100">
+            <div class="text-xs font-semibold text-red-700 mb-2">用户体验问题</div>
+            <ul class="text-xs text-stone-600 space-y-1" id="before-issues"></ul>
+          </div>
+        </div>
+        <div class="card border-green-300 p-5">
+          <div class="text-xs uppercase tracking-wide text-green-700 mb-2">✅ After（加 headless=true）</div>
+          <h3 class="font-semibold mb-3" id="after-title"></h3>
+          <ol class="text-sm text-stone-700 space-y-1.5 mb-4" id="after-flow"></ol>
+          <div class="pt-3 border-t border-stone-100">
+            <div class="text-xs font-semibold text-green-700 mb-2">收益</div>
+            <ul class="text-xs text-stone-600 space-y-1" id="after-benefits"></ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- Steps -->
+      <section class="mb-10">
+        <h2 class="text-xl font-bold mb-5">📋 5 步实施流程</h2>
+        <div class="space-y-7" id="steps-list"></div>
+      </section>
+
+      <!-- Limits -->
+      <section class="mb-10">
+        <h2 class="text-xl font-bold mb-4">⚠️ 局限与注意事项</h2>
+        <div class="card p-5 space-y-4" id="limits-list"></div>
+      </section>
+
+      <!-- Preflight -->
+      <section class="mb-10">
+        <h2 class="text-xl font-bold mb-4">✅ 上线前 checklist</h2>
+        <div class="card p-5">
+          <ul class="space-y-3" id="preflight-list"></ul>
+        </div>
+      </section>
+
+      <!-- Effort -->
+      <section class="mb-10">
+        <h2 class="text-xl font-bold mb-4">⏱ 工时估算</h2>
+        <div class="card p-5">
+          <div class="text-3xl font-bold text-orange-600 mb-1" id="effort-total"></div>
+          <div class="text-xs text-stone-500 mb-4">总计</div>
+          <div class="space-y-2" id="effort-breakdown"></div>
+        </div>
+      </section>
+
+      <!-- Footer -->
+      <footer class="mt-12 pt-6 border-t border-stone-200 text-xs text-stone-500">
+        <div class="mb-2 font-medium">数据来源</div>
+        <ul class="space-y-1" id="sources-list"></ul>
+        <p class="mt-4">
+          完整书面分析见
+          <code class="bg-stone-100 px-1 py-0.5 rounded">docs/zernio-integration-assessment.md</code>
+        </p>
+      </footer>
+    </div>
+
+    <script>
+      function escapeHtml(s) {
+        return String(s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      }
+      async function load() {
+        const data = await (await fetch("data.json")).json();
+
+        document.getElementById("title").textContent = data.title;
+        document.getElementById("subtitle").textContent = data.subtitle;
+        document.getElementById("lastUpdated").textContent = data.lastUpdated;
+        const docLink = document.getElementById("docLink");
+        docLink.href = data.officialDoc;
+
+        document.getElementById("tldr-list").innerHTML = data.tldr
+          .map((t) => `<li class="flex gap-2"><span>•</span><span>${t}</span></li>`)
+          .join("");
+
+        document.getElementById("before-title").textContent = data.comparison.before.title;
+        document.getElementById("before-flow").innerHTML = data.comparison.before.flow
+          .map((f) => `<li>${f}</li>`).join("");
+        document.getElementById("before-issues").innerHTML = data.comparison.before.issues
+          .map((i) => `<li>· ${i}</li>`).join("");
+
+        document.getElementById("after-title").textContent = data.comparison.after.title;
+        document.getElementById("after-flow").innerHTML = data.comparison.after.flow
+          .map((f) => `<li>${f}</li>`).join("");
+        document.getElementById("after-benefits").innerHTML = data.comparison.after.benefits
+          .map((b) => `<li>· ${b}</li>`).join("");
+
+        // Steps
+        document.getElementById("steps-list").innerHTML = data.steps
+          .map((s, i) => {
+            const isLast = i === data.steps.length - 1;
+            const paramsHtml = s.params
+              ? `<dl class="kv mt-2">${s.params
+                  .map((p) => `<dt>${p.key}</dt><dd>${escapeHtml(p.value)}</dd>`)
+                  .join("")}</dl>`
+              : "";
+            const headersHtml = s.headers
+              ? `<div class="text-xs font-medium text-stone-500 mt-3 mb-1">Headers</div>
+                 <dl class="kv">${s.headers.map((h) => `<dt>${h.key}</dt><dd>${escapeHtml(h.value)}</dd>`).join("")}</dl>`
+              : "";
+            const queryHtml = s.queryParams
+              ? `<dl class="kv mt-2">${s.queryParams
+                  .map((p) => `<dt>${p.key}</dt><dd>${escapeHtml(p.value)}</dd>`)
+                  .join("")}</dl>`
+              : "";
+            const bodyHtml = s.body
+              ? `<div class="text-xs font-medium text-stone-500 mt-3 mb-1">Body</div>
+                 <dl class="kv">${s.body.map((b) => `<dt>${b.key}</dt><dd>${escapeHtml(b.value)}</dd>`).join("")}</dl>`
+              : "";
+            const callbackHtml = s.callbackParams
+              ? `<div class="text-xs font-medium text-stone-500 mt-3 mb-1">回跳 URL 参数</div>
+                 <dl class="kv">${s.callbackParams.map((c) => `<dt>${c.key}</dt><dd>${escapeHtml(c.desc)}</dd>`).join("")}</dl>`
+              : "";
+            const responseHtml = s.responseShape
+              ? `<div class="text-xs font-medium text-stone-500 mt-3 mb-1">响应</div>
+                 <pre class="code">${escapeHtml(s.responseShape)}</pre>`
+              : "";
+
+            return `
+              <div class="relative">
+                ${isLast ? "" : '<div class="step-line"></div>'}
+                <div class="flex gap-4">
+                  <div class="step-num">${s.n}</div>
+                  <div class="card p-5 flex-1 min-w-0">
+                    <h3 class="font-semibold text-base mb-1">${s.title}</h3>
+                    <p class="text-sm text-stone-600 mb-3">${s.what}</p>
+                    ${s.endpoint ? `<div class="text-xs font-medium text-stone-500 mb-1">Endpoint</div><pre class="code">${escapeHtml(s.endpoint)}</pre>` : ""}
+                    ${paramsHtml}
+                    ${queryHtml}
+                    ${headersHtml}
+                    ${bodyHtml}
+                    ${callbackHtml}
+                    ${responseHtml}
+                    ${s.codeExample ? `<details class="mt-4"><summary class="text-xs font-medium text-orange-600"><span class="chev">▶</span> 看代码示例（echo-app 风格）</summary><pre class="code mt-2">${escapeHtml(s.codeExample)}</pre></details>` : ""}
+                    ${s.echoAppFile ? `<div class="mt-3 pt-3 border-t border-stone-100 text-xs text-stone-500">📁 echo-app 落地位置：<code class="bg-stone-100 px-1.5 py-0.5 rounded">${s.echoAppFile}</code></div>` : ""}
+                  </div>
+                </div>
+              </div>`;
+          })
+          .join("");
+
+        // Limits
+        document.getElementById("limits-list").innerHTML = data.limits
+          .map(
+            (l) => `
+          <div class="flex gap-3 ${l.severity === "high" ? "items-start" : "items-start"}">
+            <span class="badge ${l.severity === "high" ? "badge-high" : "badge-medium"} flex-shrink-0">${l.severity === "high" ? "HIGH" : "MED"}</span>
+            <div class="flex-1">
+              <div class="font-semibold text-sm mb-1">${l.title}</div>
+              <div class="text-xs text-stone-600">${l.detail}</div>
+            </div>
+          </div>`
+          )
+          .join("");
+
+        // Preflight
+        document.getElementById("preflight-list").innerHTML = data.preflightChecklist
+          .map(
+            (p, i) => `
+          <li class="flex items-start gap-3">
+            <input type="checkbox" class="mt-1" />
+            <div class="flex-1 min-w-0">
+              <div class="text-sm">${i + 1}. ${p.step}</div>
+              <div class="text-xs text-stone-500 font-mono break-all">${p.where}</div>
+            </div>
+          </li>`
+          )
+          .join("");
+
+        // Effort
+        document.getElementById("effort-total").textContent = data.estimatedEffort.total;
+        document.getElementById("effort-breakdown").innerHTML = data.estimatedEffort.breakdown
+          .map(
+            (e) => `
+          <div class="flex justify-between items-center text-sm py-1.5 border-b border-stone-100 last:border-0">
+            <span class="text-stone-700">${e.task}</span>
+            <span class="font-mono text-xs text-orange-600">${e.time}</span>
+          </div>`
+          )
+          .join("");
+
+        // Sources
+        document.getElementById("sources-list").innerHTML = data.sources
+          .map((s) => `<li>· <a href="${s}" target="_blank" class="text-orange-600 hover:underline">${s}</a></li>`)
+          .join("");
+      }
+      load();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,187 @@
+{
+  "lastUpdated": "2026-05-08",
+  "verifiedAt": "2026-05-08",
+  "title": "Zernio 去白牌实施流程",
+  "subtitle": "Headless OAuth 模式 · 全套餐免费 · 官方推荐方案",
+  "officialDoc": "https://zernio.com/blog/whitelabel-facebook-oauth-integration-guide",
+  "sources": [
+    "https://zernio.com/blog/whitelabel-facebook-oauth-integration-guide",
+    "https://zernio.com/blog/white-label-social-media-scheduler"
+  ],
+  "tldr": [
+    "OAuth URL 加 ?headless=true 一个参数即可启用",
+    "官方明确：包含在所有套餐里（Free / Standard / Enterprise）零额外费用",
+    "效果：用户授权后跳回你的域名，page selector UI 完全由你接管",
+    "局限：平台原生授权弹窗（如 TikTok / Facebook 弹窗）仍显示 Zernio 注册的 App 名"
+  ],
+  "comparison": {
+    "before": {
+      "title": "默认（不加 headless=true）",
+      "flow": [
+        "1. 用户点击 echo-app 的「连接 Facebook」按钮",
+        "2. 跳到 Facebook 授权页",
+        "3. 授权后跳到 zernio.com 的 page 选择页（用户能看到 Zernio 品牌）",
+        "4. 用户在 Zernio 页面选 Page",
+        "5. 跳回 echo-app"
+      ],
+      "issues": [
+        "用户看到 zernio.com 域名",
+        "page selector UI 是 Zernio 风格",
+        "跳转链路里有「外部品牌穿插」的不连贯感"
+      ]
+    },
+    "after": {
+      "title": "加上 headless=true 后",
+      "flow": [
+        "1. 用户点击 echo-app 的「连接 Facebook」按钮",
+        "2. 跳到 Facebook 授权页",
+        "3. 授权后直接跳回 echo-app 域名 + 携带 OAuth 数据",
+        "4. echo-app 渲染自己设计的 page selector",
+        "5. 用户选完 → echo-app 把选择 POST 给 Zernio API"
+      ],
+      "benefits": [
+        "用户全程只看到 echo-app 域名（除 Facebook 弹窗外）",
+        "page selector UI 完全自主设计",
+        "感知上像 echo-app 自有功能"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "n": 1,
+      "title": "构造连接 URL",
+      "what": "在 echo-app 后端构造 Zernio connect API 的 URL，关键是加上 headless=true",
+      "endpoint": "GET https://zernio.com/api/v1/connect/{platform}",
+      "params": [
+        { "key": "profileId", "value": "你的 Zernio profile ID（注册时获得）" },
+        { "key": "redirect_url", "value": "https://yourapp.com/api/channels/zernio/{platform}/callback" },
+        { "key": "headless", "value": "true（关键参数）" }
+      ],
+      "headers": [
+        { "key": "Authorization", "value": "Bearer YOUR_ZERNIO_API_KEY" }
+      ],
+      "echoAppFile": "src/app/api/channels/zernio/[platform]/connect/route.ts",
+      "codeExample": "const url = new URL('https://zernio.com/api/v1/connect/facebook');\nurl.searchParams.set('profileId', process.env.ZERNIO_PROFILE_ID);\nurl.searchParams.set('redirect_url', `${AUTH_URL}/api/channels/zernio/facebook/callback`);\nurl.searchParams.set('headless', 'true');\n\nconst res = await fetch(url, {\n  headers: { Authorization: `Bearer ${process.env.ZERNIO_API_KEY}` }\n});\nconst { authUrl } = await res.json();\nreturn NextResponse.json({ authorizeUrl: authUrl });"
+    },
+    {
+      "n": 2,
+      "title": "返回 authUrl，前端跳转",
+      "what": "Zernio 返回 Facebook 的真实 OAuth URL，前端拿到后做 window.location 跳转",
+      "responseShape": "{ \"authUrl\": \"https://www.facebook.com/dialog/oauth?...\" }",
+      "echoAppFile": "src/app/[lang]/(dashboard)/social/settings/page.tsx",
+      "codeExample": "// 前端\nconst { authorizeUrl } = await fetch('/api/channels/zernio/facebook/connect', { method: 'POST' }).then(r => r.json());\nwindow.location.href = authorizeUrl;"
+    },
+    {
+      "n": 3,
+      "title": "Facebook 授权完成 → 回跳到你的 callback",
+      "what": "用户在 Facebook 授权后，会被跳回你在第 1 步设置的 redirect_url，URL 带 6 个参数",
+      "callbackParams": [
+        { "key": "profileId", "desc": "你的 Zernio profile id" },
+        { "key": "tempToken", "desc": "临时 token，用于后续 API 调用" },
+        { "key": "userProfile", "desc": "URL-encoded JSON，含用户基本资料" },
+        { "key": "connect_token", "desc": "X-Connect-Token header 的值" },
+        { "key": "platform", "desc": "platform=facebook" },
+        { "key": "step", "desc": "step=select_page（提示下一步是选 Page）" }
+      ],
+      "echoAppFile": "src/app/api/channels/zernio/[platform]/callback/route.ts",
+      "codeExample": "// /api/channels/zernio/facebook/callback\nexport async function GET(req: NextRequest) {\n  const sp = req.nextUrl.searchParams;\n  const oauthData = {\n    profileId: sp.get('profileId'),\n    tempToken: sp.get('tempToken'),\n    connectToken: sp.get('connect_token'),\n    userProfile: JSON.parse(decodeURIComponent(sp.get('userProfile') ?? ''))\n  };\n  // 暂存（cookie / session / 短 TTL Redis）\n  const res = NextResponse.redirect(new URL('/social/settings/zernio-pages', req.url));\n  res.cookies.set('zernio_oauth', JSON.stringify(oauthData), { httpOnly: true, maxAge: 600 });\n  return res;\n}"
+    },
+    {
+      "n": 4,
+      "title": "用 tempToken 拉 Page 列表 + 渲染你自己的 selector",
+      "what": "在你自己设计的页面里，用第 3 步拿到的 tempToken 调 Zernio 的 select-page GET 接口拿可用 Page 列表",
+      "endpoint": "GET https://zernio.com/api/v1/connect/{platform}/select-page",
+      "queryParams": [
+        { "key": "profileId", "value": "第 3 步拿到的 profileId" },
+        { "key": "tempToken", "value": "第 3 步拿到的 tempToken" }
+      ],
+      "headers": [
+        { "key": "X-Connect-Token", "value": "第 3 步拿到的 connect_token" }
+      ],
+      "echoAppFile": "src/app/[lang]/(dashboard)/social/settings/zernio-pages/page.tsx",
+      "codeExample": "// 在 echo-app 内嵌的 React 页面\nconst { pages } = await fetch(\n  `https://zernio.com/api/v1/connect/facebook/select-page?profileId=${id}&tempToken=${token}`,\n  { headers: { 'X-Connect-Token': connectToken } }\n).then(r => r.json());\n\nreturn (\n  <div>\n    <h1>选择要管理的 Facebook Page（echo-app 风格）</h1>\n    {pages.map(p => (\n      <button onClick={() => selectPage(p.id)}>{p.name}</button>\n    ))}\n  </div>\n);"
+    },
+    {
+      "n": 5,
+      "title": "用户选完，POST 选择回 Zernio",
+      "what": "用户在你的 UI 里选了某个 Page 后，把选择 POST 给 Zernio API，完成绑定",
+      "endpoint": "POST https://zernio.com/api/v1/connect/{platform}/select-page",
+      "body": [
+        { "key": "profileId", "value": "string" },
+        { "key": "pageId", "value": "用户选中的 Page ID" },
+        { "key": "tempToken", "value": "string" },
+        { "key": "userProfile", "value": "object（第 3 步解码后的）" }
+      ],
+      "echoAppFile": "src/app/api/channels/zernio/[platform]/select-page/route.ts",
+      "codeExample": "// 前端调你后端，后端代理到 Zernio（不要把 API key 暴露到浏览器）\nexport async function POST(req: NextRequest) {\n  const { pageId } = await req.json();\n  const oauthData = JSON.parse(req.cookies.get('zernio_oauth')?.value ?? '{}');\n\n  const r = await fetch('https://zernio.com/api/v1/connect/facebook/select-page', {\n    method: 'POST',\n    headers: {\n      Authorization: `Bearer ${process.env.ZERNIO_API_KEY}`,\n      'Content-Type': 'application/json',\n      'X-Connect-Token': oauthData.connectToken\n    },\n    body: JSON.stringify({\n      profileId: oauthData.profileId,\n      pageId,\n      tempToken: oauthData.tempToken,\n      userProfile: oauthData.userProfile\n    })\n  });\n\n  // 落 ChannelConnection（按 echo-app 现有 Meta 流程的模式）\n  const result = await r.json();\n  await prisma.channelConnection.create({ /* ... */ });\n  return NextResponse.json({ ok: true });\n}"
+    }
+  ],
+  "preflightChecklist": [
+    {
+      "step": "注册 Zernio 账号 + 拿 profileId 和 API key",
+      "where": "https://zernio.com/signup",
+      "done": false
+    },
+    {
+      "step": "邮件 sales 确认 Inbox add-on 价格 + reseller 条款",
+      "where": "（见调研报告里的 5 个 BLOCKER 问题）",
+      "done": false
+    },
+    {
+      "step": "echo-app 加 ZERNIO_API_KEY、ZERNIO_PROFILE_ID 到 .env / Railway",
+      "where": "Railway dashboard → Variables",
+      "done": false
+    },
+    {
+      "step": "新增 ZERNIO_ENABLED feature flag（默认 false）",
+      "where": "src/lib/integrations-runtime.ts",
+      "done": false
+    },
+    {
+      "step": "实现 5 步流程对应的 5 个路由 / 页面",
+      "where": "见每步的 echoAppFile 字段",
+      "done": false
+    },
+    {
+      "step": "本地用 Facebook 测试 page 端到端跑通一次",
+      "where": "Meta Developer Test Users",
+      "done": false
+    },
+    {
+      "step": "复用同套流程接其他平台（TikTok / X / LinkedIn …）",
+      "where": "URL 中 facebook 替换为 tiktok / x / linkedin / ...",
+      "done": false
+    }
+  ],
+  "limits": [
+    {
+      "title": "平台 OAuth 弹窗的 App 名",
+      "detail": "用户在 Facebook / TikTok 授权时弹出的「XX wants to access your account」弹窗里，「XX」是 Zernio 在该平台注册的 App 名（如 Social Media Connector），headless 模式无法改变这个 —— 这是 Facebook/TikTok 协议层决定的，要改唯一办法是 echo-app 自己向各平台申请独立 App + 过 App Review",
+      "severity": "high"
+    },
+    {
+      "title": "API key 不能暴露到前端",
+      "detail": "ZERNIO_API_KEY 必须放在 Next.js 服务端路由里，所有 Zernio API 调用都通过 echo-app 后端代理。绝不要在浏览器 fetch 里直接放 Bearer token",
+      "severity": "high"
+    },
+    {
+      "title": "tempToken 短期有效",
+      "detail": "Zernio 的 tempToken 是会话级的，必须在用户进入 page selector 后较短时间内完成选择。超时需要重新走 OAuth 流程",
+      "severity": "medium"
+    },
+    {
+      "title": "OAuth 数据需安全暂存",
+      "detail": "step 3 → step 5 之间需在服务器侧暂存 oauthData（cookie httpOnly / 短 TTL Redis），不要放浏览器 localStorage（XSS 风险）",
+      "severity": "medium"
+    }
+  ],
+  "estimatedEffort": {
+    "total": "1.5–3 人日",
+    "breakdown": [
+      { "task": "注册 + 拿 key + 读官方文档", "time": "0.5 天" },
+      { "task": "实现 5 步流程的 connect/callback/select-page 路由", "time": "0.5–1 天" },
+      { "task": "实现 echo-app 风格的 page selector UI", "time": "0.5 天" },
+      { "task": "端到端 Facebook 测试 + 调 bug", "time": "0.5 天" }
+    ]
+  }
+}
